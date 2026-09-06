@@ -1,0 +1,95 @@
+CREATE DATABASE FlashCommercePro;
+GO
+USE FlashCommercePro;
+GO
+-- 1. Bảng Users (Người dùng)
+CREATE TABLE Users (
+    Id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+    Username NVARCHAR(50) UNIQUE NOT NULL,
+    Email NVARCHAR(100) UNIQUE NOT NULL,
+    PasswordHash NVARCHAR(255) NOT NULL,
+    Role NVARCHAR(20) NOT NULL DEFAULT 'Customer', 
+    CreatedAt DATETIME2 DEFAULT GETUTCDATE()
+);
+-- 2. Bảng Addresses (Địa chỉ giao hàng)
+CREATE TABLE Addresses (
+    Id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+    UserId UNIQUEIDENTIFIER NOT NULL FOREIGN KEY REFERENCES Users(Id),
+    FullName NVARCHAR(100) NOT NULL,
+    PhoneNumber NVARCHAR(20) NOT NULL,
+    FullAddress NVARCHAR(500) NOT NULL,
+    IsDefault BIT NOT NULL DEFAULT 0
+);
+-- 3. Bảng Categories (Danh mục sản phẩm)
+CREATE TABLE Categories (
+    Id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+    Name NVARCHAR(100) NOT NULL,
+    ParentId UNIQUEIDENTIFIER NULL FOREIGN KEY REFERENCES Categories(Id),
+    Slug NVARCHAR(100) UNIQUE NOT NULL
+);
+-- 4. Bảng Products (Sản phẩm)
+CREATE TABLE Products (
+    Id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+    Name NVARCHAR(255) NOT NULL,
+    Description NVARCHAR(MAX),
+    Price DECIMAL(18, 2) NOT NULL,
+    StockQuantity INT NOT NULL DEFAULT 0,
+    IsFlashSale BIT NOT NULL DEFAULT 0,
+    CreatedAt DATETIME2 DEFAULT GETUTCDATE()
+);
+-- 5. Bảng ProductCategories (Mối quan hệ Sản phẩm - Danh mục)
+CREATE TABLE ProductCategories (
+    ProductId UNIQUEIDENTIFIER NOT NULL FOREIGN KEY REFERENCES Products(Id),
+    CategoryId UNIQUEIDENTIFIER NOT NULL FOREIGN KEY REFERENCES Categories(Id),
+    PRIMARY KEY (ProductId, CategoryId)
+);
+-- 6. Bảng Coupons (Mã giảm giá)
+CREATE TABLE Coupons (
+    Id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+    Code NVARCHAR(20) UNIQUE NOT NULL,
+    DiscountPercent INT NOT NULL CHECK (DiscountPercent > 0 AND DiscountPercent <= 100),
+    MaxUsage INT NOT NULL,
+    CurrentUsage INT NOT NULL DEFAULT 0,
+    ValidFrom DATETIME2 NOT NULL,
+    ValidTo DATETIME2 NOT NULL
+);
+-- 7. Bảng Orders (Đơn hàng)
+CREATE TABLE Orders (
+    Id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+    UserId UNIQUEIDENTIFIER NOT NULL FOREIGN KEY REFERENCES Users(Id),
+    AddressId UNIQUEIDENTIFIER NOT NULL FOREIGN KEY REFERENCES Addresses(Id),
+    CouponId UNIQUEIDENTIFIER NULL FOREIGN KEY REFERENCES Coupons(Id),
+    TotalAmount DECIMAL(18, 2) NOT NULL, 
+    FinalAmount DECIMAL(18, 2) NOT NULL, 
+    Status NVARCHAR(50) NOT NULL DEFAULT 'Pending', 
+    CreatedAt DATETIME2 DEFAULT GETUTCDATE()
+);
+-- 8. Bảng OrderItems (Chi tiết đơn hàng)
+CREATE TABLE OrderItems (
+    Id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+    OrderId UNIQUEIDENTIFIER NOT NULL FOREIGN KEY REFERENCES Orders(Id),
+    ProductId UNIQUEIDENTIFIER NOT NULL FOREIGN KEY REFERENCES Products(Id),
+    Quantity INT NOT NULL CHECK (Quantity > 0),
+    UnitPrice DECIMAL(18, 2) NOT NULL
+);
+-- 9. Bảng Payments (Lịch sử thanh toán)
+CREATE TABLE Payments (
+    Id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+    OrderId UNIQUEIDENTIFIER NOT NULL FOREIGN KEY REFERENCES Orders(Id),
+    PaymentMethod NVARCHAR(50) NOT NULL, 
+    TransactionId NVARCHAR(100) NULL,
+    Amount DECIMAL(18, 2) NOT NULL,
+    Status NVARCHAR(50) NOT NULL DEFAULT 'Pending', 
+    CreatedAt DATETIME2 DEFAULT GETUTCDATE()
+);
+-- 10. Bảng Reviews (Đánh giá sản phẩm)
+CREATE TABLE Reviews (
+    Id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+    UserId UNIQUEIDENTIFIER NOT NULL FOREIGN KEY REFERENCES Users(Id),
+    ProductId UNIQUEIDENTIFIER NOT NULL FOREIGN KEY REFERENCES Products(Id),
+    Rating INT NOT NULL CHECK (Rating >= 1 AND Rating <= 5),
+    Comment NVARCHAR(MAX) NULL,
+    CreatedAt DATETIME2 DEFAULT GETUTCDATE(),
+    UNIQUE (UserId, ProductId) 
+);
+GO
