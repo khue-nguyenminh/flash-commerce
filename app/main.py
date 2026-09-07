@@ -2,8 +2,10 @@ from fastapi import FastAPI, HTTPException
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from app.core.database import engine
+from app.routers.auth import router as auth_router
 
 app =  FastAPI(title = "Flash Commerce API")
+app.include_router(auth_router)
 
 @app.get("/")
 def read_root():
