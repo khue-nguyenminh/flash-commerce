@@ -3,9 +3,11 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from app.core.database import engine
 from app.routers.auth import router as auth_router
+from app.routers.addresses import router as addresses_router
 
 app =  FastAPI(title = "Flash Commerce API")
 app.include_router(auth_router)
+app.include_router(addresses_router)
 
 @app.get("/")
 def read_root():
