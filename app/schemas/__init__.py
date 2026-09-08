@@ -3,6 +3,12 @@ from app.schemas.address import (
     AddressResponse,
     AddressUpdate,
 )
+from app.schemas.category import (
+    CategoryCreate,
+    CategoryResponse,
+    CategoryTreeNode,
+    CategoryUpdate,
+)
 from app.schemas.auth import TokenResponse
 from app.schemas.user import UserCreate, UserResponse
 
@@ -13,4 +19,8 @@ __all__ = [
     "TokenResponse",
     "UserCreate",
     "UserResponse",
+    "CategoryCreate",
+    "CategoryResponse",
+    "CategoryTreeNode",
+    "CategoryUpdate",
 ]
