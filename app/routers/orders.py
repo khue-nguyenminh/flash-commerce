@@ -1,21 +1,40 @@
 import uuid
-from decimal import Decimal
+from datetime import datetime, timezone
+from decimal import Decimal, ROUND_HALF_UP
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy import select, func
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Query,
+    status,
+)
+from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
+from app.models import (
+    Address,
+    Coupon,
+    Order,
+    OrderItem,
+    Product,
+    User,
+)
+from app.schemas import (
+    OrderCreate,
+    OrderListResponse,
+    OrderResponse,
+)
 
-from app.models import Address, Order, OrderItem, Product, User
-from app.schemas import OrderCreate, OrderResponse, OrderListResponse
 
 router = APIRouter(
     prefix="/orders",
     tags=["Orders"],
 )
+
 
 def serialize_order(
     order: Order,
@@ -25,6 +44,7 @@ def serialize_order(
         "id": order.id,
         "user_id": order.user_id,
         "address_id": order.address_id,
+        "coupon_id": order.coupon_id,
         "total_amount": order.total_amount,
         "final_amount": order.final_amount,
         "status": order.status,
@@ -38,6 +58,7 @@ def serialize_order(
             for item in order_items
         ],
     }
+
 
 @router.post(
     "",
@@ -68,8 +89,6 @@ def create_order(
             for item in order_data.items
         }
 
-        # Sort IDs so concurrent orders lock products in the same order.
-        # This reduces the chance of database deadlocks.
         sorted_product_ids = sorted(
             requested_items,
             key=str,
@@ -118,12 +137,72 @@ def create_order(
             Decimal("0.00"),
         )
 
+        coupon = None
+        final_amount = total_amount
+
+        if order_data.coupon_code is not None:
+            coupon = db.scalar(
+                select(Coupon)
+                .where(
+                    Coupon.code == order_data.coupon_code
+                )
+                .with_hint(
+                    Coupon,
+                    "WITH (UPDLOCK, ROWLOCK)",
+                    dialect_name="mssql",
+                )
+            )
+
+            if coupon is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Coupon not found",
+                )
+
+            current_time = (
+                datetime.now(timezone.utc)
+                .replace(tzinfo=None)
+            )
+
+            if (
+                current_time < coupon.valid_from
+                or current_time > coupon.valid_to
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Coupon is not currently valid",
+                )
+
+            if coupon.current_usage >= coupon.max_usage:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        "Coupon usage limit has been reached"
+                    ),
+                )
+
+            discount_amount = (
+                total_amount
+                * Decimal(coupon.discount_percent)
+                / Decimal("100")
+            ).quantize(
+                Decimal("0.01"),
+                rounding=ROUND_HALF_UP,
+            )
+
+            final_amount = total_amount - discount_amount
+            coupon.current_usage += 1
+
         new_order = Order(
             user_id=current_user.id,
             address_id=address.id,
-            coupon_id=None,
+            coupon_id=(
+                coupon.id
+                if coupon is not None
+                else None
+            ),
             total_amount=total_amount,
-            final_amount=total_amount,
+            final_amount=final_amount,
             status="Pending",
         )
 
@@ -173,12 +252,14 @@ def create_order(
         "id": new_order.id,
         "user_id": new_order.user_id,
         "address_id": new_order.address_id,
+        "coupon_id": new_order.coupon_id,
         "total_amount": new_order.total_amount,
         "final_amount": new_order.final_amount,
         "status": new_order.status,
         "created_at": new_order.created_at,
         "items": response_items,
     }
+
 
 @router.get(
     "",
@@ -202,12 +283,18 @@ def get_orders(
     orders = db.scalars(
         select(Order)
         .where(Order.user_id == current_user.id)
-        .order_by(Order.created_at.desc(), Order.id)
+        .order_by(
+            Order.created_at.desc(),
+            Order.id,
+        )
         .offset((page - 1) * page_size)
         .limit(page_size)
     ).all()
 
-    order_ids = [order.id for order in orders]
+    order_ids = [
+        order.id
+        for order in orders
+    ]
 
     item_map = {
         order_id: []
@@ -217,12 +304,16 @@ def get_orders(
     if order_ids:
         order_items = db.scalars(
             select(OrderItem)
-            .where(OrderItem.order_id.in_(order_ids))
+            .where(
+                OrderItem.order_id.in_(order_ids)
+            )
             .order_by(OrderItem.id)
         ).all()
 
         for order_item in order_items:
-            item_map[order_item.order_id].append(order_item)
+            item_map[order_item.order_id].append(
+                order_item
+            )
 
     return {
         "items": [
@@ -266,7 +357,10 @@ def get_order(
         .order_by(OrderItem.id)
     ).all()
 
-    return serialize_order(order, order_items)
+    return serialize_order(
+        order,
+        order_items,
+    )
 
 
 @router.patch(
@@ -279,7 +373,6 @@ def cancel_order(
     db: Session = Depends(get_db),
 ):
     try:
-        # Lock the Order so two cancellation requests cannot both refund stock.
         order = db.scalar(
             select(Order)
             .where(
@@ -323,7 +416,6 @@ def cancel_order(
             key=str,
         )
 
-        # Lock Product rows before restoring stock.
         for product_id in sorted_product_ids:
             product = db.scalar(
                 select(Product)
@@ -339,13 +431,45 @@ def cancel_order(
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail=(
-                        f"Product {product_id} no longer exists"
+                        f"Product {product_id} "
+                        "no longer exists"
                     ),
                 )
 
             product.stock_quantity += (
-                item_by_product_id[product_id].quantity
+                item_by_product_id[
+                    product_id
+                ].quantity
             )
+
+        if order.coupon_id is not None:
+            coupon = db.scalar(
+                select(Coupon)
+                .where(Coupon.id == order.coupon_id)
+                .with_hint(
+                    Coupon,
+                    "WITH (UPDLOCK, ROWLOCK)",
+                    dialect_name="mssql",
+                )
+            )
+
+            if coupon is None:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        "Order coupon no longer exists"
+                    ),
+                )
+
+            if coupon.current_usage <= 0:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        "Coupon usage data is inconsistent"
+                    ),
+                )
+
+            coupon.current_usage -= 1
 
         order.status = "Cancelled"
 
@@ -363,4 +487,7 @@ def cancel_order(
             detail="Unable to cancel order",
         )
 
-    return serialize_order(order, order_items)
+    return serialize_order(
+        order,
+        order_items,
+    )

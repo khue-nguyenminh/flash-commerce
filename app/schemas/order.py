@@ -2,8 +2,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, Field, model_validator
-
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 class OrderItemCreate(BaseModel):
     product_id: uuid.UUID
@@ -13,10 +12,30 @@ class OrderItemCreate(BaseModel):
 class OrderCreate(BaseModel):
     address_id: uuid.UUID
     items: list[OrderItemCreate] = Field(min_length=1)
+    coupon_code: str | None = Field(
+        default=None,
+        max_length=20,
+    )
+
+    @field_validator("coupon_code")
+    @classmethod
+    def normalize_coupon_code(
+        cls,
+        value: str | None,
+    ) -> str | None:
+        if value is None:
+            return None
+
+        normalized_code = value.strip().upper()
+
+        return normalized_code or None
 
     @model_validator(mode="after")
     def validate_unique_products(self):
-        product_ids = [item.product_id for item in self.items]
+        product_ids = [
+            item.product_id
+            for item in self.items
+        ]
 
         if len(product_ids) != len(set(product_ids)):
             raise ValueError(
@@ -37,6 +56,7 @@ class OrderResponse(BaseModel):
     user_id: uuid.UUID
     address_id: uuid.UUID
     total_amount: Decimal
+    coupon_id: uuid.UUID | None
     final_amount: Decimal
     status: str
     created_at: datetime
