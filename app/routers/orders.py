@@ -1,21 +1,43 @@
+import uuid
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, status, Query
+from sqlalchemy import select, func
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
-from app.models import Address, Order, OrderItem, Product, User
-from app.schemas import OrderCreate, OrderResponse
 
+from app.models import Address, Order, OrderItem, Product, User
+from app.schemas import OrderCreate, OrderResponse, OrderListResponse
 
 router = APIRouter(
     prefix="/orders",
     tags=["Orders"],
 )
 
+def serialize_order(
+    order: Order,
+    order_items: list[OrderItem],
+):
+    return {
+        "id": order.id,
+        "user_id": order.user_id,
+        "address_id": order.address_id,
+        "total_amount": order.total_amount,
+        "final_amount": order.final_amount,
+        "status": order.status,
+        "created_at": order.created_at,
+        "items": [
+            {
+                "product_id": item.product_id,
+                "quantity": item.quantity,
+                "unit_price": item.unit_price,
+            }
+            for item in order_items
+        ],
+    }
 
 @router.post(
     "",
@@ -157,3 +179,188 @@ def create_order(
         "created_at": new_order.created_at,
         "items": response_items,
     }
+
+@router.get(
+    "",
+    response_model=OrderListResponse,
+)
+def get_orders(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=10, ge=1, le=100),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    total = (
+        db.scalar(
+            select(func.count())
+            .select_from(Order)
+            .where(Order.user_id == current_user.id)
+        )
+        or 0
+    )
+
+    orders = db.scalars(
+        select(Order)
+        .where(Order.user_id == current_user.id)
+        .order_by(Order.created_at.desc(), Order.id)
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    ).all()
+
+    order_ids = [order.id for order in orders]
+
+    item_map = {
+        order_id: []
+        for order_id in order_ids
+    }
+
+    if order_ids:
+        order_items = db.scalars(
+            select(OrderItem)
+            .where(OrderItem.order_id.in_(order_ids))
+            .order_by(OrderItem.id)
+        ).all()
+
+        for order_item in order_items:
+            item_map[order_item.order_id].append(order_item)
+
+    return {
+        "items": [
+            serialize_order(
+                order,
+                item_map[order.id],
+            )
+            for order in orders
+        ],
+        "page": page,
+        "page_size": page_size,
+        "total": total,
+    }
+
+
+@router.get(
+    "/{order_id}",
+    response_model=OrderResponse,
+)
+def get_order(
+    order_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    order = db.scalar(
+        select(Order).where(
+            Order.id == order_id,
+            Order.user_id == current_user.id,
+        )
+    )
+
+    if order is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Order not found",
+        )
+
+    order_items = db.scalars(
+        select(OrderItem)
+        .where(OrderItem.order_id == order.id)
+        .order_by(OrderItem.id)
+    ).all()
+
+    return serialize_order(order, order_items)
+
+
+@router.patch(
+    "/{order_id}/cancel",
+    response_model=OrderResponse,
+)
+def cancel_order(
+    order_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        # Lock the Order so two cancellation requests cannot both refund stock.
+        order = db.scalar(
+            select(Order)
+            .where(
+                Order.id == order_id,
+                Order.user_id == current_user.id,
+            )
+            .with_hint(
+                Order,
+                "WITH (UPDLOCK, ROWLOCK)",
+                dialect_name="mssql",
+            )
+        )
+
+        if order is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Order not found",
+            )
+
+        if order.status != "Pending":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Only Pending orders can be cancelled"
+                ),
+            )
+
+        order_items = db.scalars(
+            select(OrderItem)
+            .where(OrderItem.order_id == order.id)
+            .order_by(OrderItem.product_id)
+        ).all()
+
+        item_by_product_id = {
+            item.product_id: item
+            for item in order_items
+        }
+
+        sorted_product_ids = sorted(
+            item_by_product_id,
+            key=str,
+        )
+
+        # Lock Product rows before restoring stock.
+        for product_id in sorted_product_ids:
+            product = db.scalar(
+                select(Product)
+                .where(Product.id == product_id)
+                .with_hint(
+                    Product,
+                    "WITH (UPDLOCK, ROWLOCK)",
+                    dialect_name="mssql",
+                )
+            )
+
+            if product is None:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        f"Product {product_id} no longer exists"
+                    ),
+                )
+
+            product.stock_quantity += (
+                item_by_product_id[product_id].quantity
+            )
+
+        order.status = "Cancelled"
+
+        db.commit()
+        db.refresh(order)
+
+    except HTTPException:
+        db.rollback()
+        raise
+
+    except SQLAlchemyError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to cancel order",
+        )
+
+    return serialize_order(order, order_items)

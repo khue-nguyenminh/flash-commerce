@@ -41,3 +41,9 @@ class OrderResponse(BaseModel):
     status: str
     created_at: datetime
     items: list[OrderItemResponse]
+
+class OrderListResponse(BaseModel):
+    items: list[OrderResponse]
+    page: int
+    page_size: int
+    total: int
