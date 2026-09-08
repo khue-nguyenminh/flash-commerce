@@ -11,6 +11,7 @@ from app.schemas.category import (
 )
 from app.schemas.auth import TokenResponse
 from app.schemas.user import UserCreate, UserResponse
+from app.schemas.product import (ProductCreate, ProductResponse, ProductListResponse, ProductUpdate,)
 
 __all__ = [
     "AddressCreate",
@@ -23,4 +24,8 @@ __all__ = [
     "CategoryResponse",
     "CategoryTreeNode",
     "CategoryUpdate",
+    "ProductCreate",
+    "ProductResponse",
+    "ProductListReponse",
+    "ProductUpdate",
 ]

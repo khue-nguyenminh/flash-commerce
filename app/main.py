@@ -5,11 +5,13 @@ from app.core.database import engine
 from app.routers.auth import router as auth_router
 from app.routers.addresses import router as addresses_router
 from app.routers.categories import router as categories_router
+from app.routers.products import router as products_router
 
 app =  FastAPI(title = "Flash Commerce API")
 app.include_router(auth_router)
 app.include_router(addresses_router)
 app.include_router(categories_router)
+app.include_router(products_router)
 
 @app.get("/")
 def read_root():
