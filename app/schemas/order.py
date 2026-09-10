@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 from decimal import Decimal
-
+from typing import Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 class OrderItemCreate(BaseModel):
@@ -67,3 +67,10 @@ class OrderListResponse(BaseModel):
     page: int
     page_size: int
     total: int
+
+class OrderStatusUpdate(BaseModel):
+    status: Literal[
+        "Processing",
+        "Shipped",
+        "Completed",
+    ]
