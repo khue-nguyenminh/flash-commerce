@@ -8,6 +8,7 @@ from app.routers.categories import router as categories_router
 from app.routers.products import router as products_router
 from app.routers.orders import router as orders_router
 from app.routers.coupons import router as coupons_router
+from app.routers.payments import router as payments_router
 
 app =  FastAPI(title = "Flash Commerce API")
 app.include_router(auth_router)
@@ -16,6 +17,7 @@ app.include_router(categories_router)
 app.include_router(products_router)
 app.include_router(orders_router)
 app.include_router(coupons_router)
+app.include_router(payments_router)
 
 @app.get("/")
 def read_root():
