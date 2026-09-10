@@ -110,11 +110,9 @@ flash-commerce/
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/flash-commerce.git
+git clone https://github.com/khue-nguyenminh/flash-commerce.git
 cd flash-commerce
 ```
-
-Replace `YOUR_USERNAME` with the repository owner's GitHub username.
 
 ### 2. Create a virtual environment
 
