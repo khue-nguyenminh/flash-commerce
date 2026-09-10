@@ -10,5 +10,6 @@ from app.models.order_item import OrderItem
 from app.models.payment import Payment
 from app.models.review import Review
 from app.models.payment import Payment
+from app.models.review import Review
 
-__all__ = ["Base", "User", "Address", "Category", "Product", "ProductCategory", "Coupon", "Order", "OrderItem", "Payment","Review", "Payment"]
+__all__ = ["Base", "User", "Address", "Category", "Product", "ProductCategory", "Coupon", "Order", "OrderItem", "Payment","Review", "Payment", "Review"]

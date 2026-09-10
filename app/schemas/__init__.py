@@ -15,6 +15,7 @@ from app.schemas.product import (ProductCreate, ProductResponse, ProductListResp
 from app.schemas.order import (OrderCreate, OrderItemCreate, OrderItemResponse, OrderListResponse, OrderResponse, OrderStatusUpdate)
 from app.schemas.coupon import (CouponCreate, CouponResponse, CouponUpdate,)
 from app.schemas.payment import PaymentCreate, PaymentResponse
+from app.schemas.review import (ReviewCreate, ReviewResponse, ReviewUpdate)
 
 __all__ = [
     "AddressCreate",
@@ -42,4 +43,7 @@ __all__ = [
     "PaymentCreate",
     "PaymentResponse",
     "OrderStatusUpdate"
+    "ReviewCreate",
+    "ReviewResponse",
+    "ReviewUpdate",
 ]
